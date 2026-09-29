@@ -17,6 +17,31 @@
   under the License.
 -->
 
+## How to test this with no WisdomAI UI, no WisdomAI login, and no Snowflake account or warehouse
+
+You do not need the WisdomAI UI, a WisdomAI login, a Snowflake account, or a Snowflake warehouse. These commands do not sign in to WisdomAI or Snowflake. The inputs are the files in `tests/fixtures/finance/`.
+
+Run this from `converters/wisdom-semantic-view`. You need Python 3.11 or newer and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync
+uv run pytest
+uv run ossie-wisdom-semantic-view to-wisdom \
+  tests/fixtures/finance/snowflake/cfo_cockpit.before.yaml \
+  --enrich tests/fixtures/finance/wisdom/enrichment.yaml \
+  -o /tmp/finance-domain.json
+uv run ossie-wisdom-semantic-view to-semantic-view \
+  /tmp/finance-domain.json \
+  -o /tmp/finance-after.yaml
+# The fixture file starts with the ASF license header. The command writes the YAML only.
+awk 'p{print} /^# under the License\./{p=1}' \
+  tests/fixtures/finance/snowflake/cfo_cockpit.before.yaml \
+  | tail -n +2 > /tmp/finance-before.yaml
+diff -u /tmp/finance-before.yaml /tmp/finance-after.yaml
+```
+
+Passing looks like this. `uv run pytest` exits 0. Both `ossie-wisdom-semantic-view` commands exit 0. `diff -u` prints a unified diff that only adds the `revenue` metric, the synonyms `revenue`, `net revenue`, and `board revenue`, and the February fiscal-year `sql_generation` line. `diff` exits 1 because those lines are new. That is the result you want. The February line is demo copy.
+
 # Apache Ossie Wisdom semantic-view converter
 
 Offline conversion of one Snowflake semantic view through an Apache Ossie document
