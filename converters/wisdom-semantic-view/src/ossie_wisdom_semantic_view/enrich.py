@@ -23,7 +23,12 @@ import copy
 
 from ossie_wisdom_semantic_view.model import check_metric_expression, die, require_keys
 from ossie_wisdom_semantic_view.semantic_view import MANY_SIDE
-from ossie_wisdom_semantic_view.wisdom import knowledge_id, measure_id, reject_nonempty_synonym_sets
+from ossie_wisdom_semantic_view.wisdom import (
+    knowledge_id,
+    measure_id,
+    reject_duplicate_knowledge_ids,
+    reject_nonempty_synonym_sets,
+)
 
 _ENRICHMENT_KEYS = {"metric", "knowledge"}
 _METRIC_KEYS = {"name", "expr", "description"}
@@ -78,21 +83,28 @@ def apply_enrichment(export: dict, enrichment: dict) -> dict:
     blocks = enrichment["knowledge"]
     if not isinstance(blocks, list) or not blocks:
         die("knowledge")
+    existing_names = {item.get("name") for item in knowledge}
+    prepared: list[dict] = []
     for block in blocks:
         require_keys(block, _KNOWLEDGE_KEYS)
         for key in ("name", "content"):
             if key not in block:
                 die(key)
+        name = block["name"]
+        if name in existing_names:
+            die(f"{name} already exists")
+        existing_names.add(name)
         content = block["content"]
         if not isinstance(content, str):
             die("content")
-        content = content.rstrip("\n")
-        knowledge.append(
+        prepared.append(
             {
-                "name": block["name"],
-                "content": content,
-                "id": knowledge_id(block["name"]),
+                "name": name,
+                "content": content.rstrip("\n"),
+                "id": knowledge_id(name),
             }
         )
+    knowledge.extend(prepared)
+    reject_duplicate_knowledge_ids(knowledge)
     reject_nonempty_synonym_sets(enriched)
     return enriched

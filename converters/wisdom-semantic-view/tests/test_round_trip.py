@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from ossie_wisdom_semantic_view.cli import main
+from ossie_wisdom_semantic_view.enrich import apply_enrichment, load_enrichment
 from ossie_wisdom_semantic_view.model import dump_ossie, load_ossie
 from ossie_wisdom_semantic_view.pipeline import convert_finance
 from ossie_wisdom_semantic_view.semantic_view import (
@@ -166,6 +167,94 @@ def test_other_data_type_exits(capsys):
         semantic_view_to_ossie(view)
     assert caught.value.code == 1
     assert capsys.readouterr().err.strip() == "FLOAT"
+
+
+def test_enrichment_rejects_preexisting_sql_generation(capsys):
+    view = load_semantic_view(fixture_body(FINANCE / "snowflake" / "cfo_cockpit.before.yaml"))
+    view["module_custom_instructions"] = {
+        "sql_generation": "Board revenue is recognized bookings."
+    }
+    export = ossie_to_wisdom(semantic_view_to_ossie(view))
+    assert [item["name"] for item in export["domain"]["zsheet_json"]["knowledge"]] == ["Board revenue"]
+    enrichment = load_enrichment(fixture_body(FINANCE / "wisdom" / "enrichment.yaml"))
+    with pytest.raises(SystemExit) as caught:
+        apply_enrichment(export, enrichment)
+    assert caught.value.code == 1
+    assert capsys.readouterr().err.strip() == "Board revenue already exists"
+    assert [item["name"] for item in export["domain"]["zsheet_json"]["knowledge"]] == ["Board revenue"]
+
+
+def test_null_synonym_sets_are_empty_and_non_dict_items_exit(capsys):
+    artifacts = convert_finance(
+        fixture_body(FINANCE / "snowflake" / "cfo_cockpit.before.yaml"),
+        fixture_body(FINANCE / "wisdom" / "enrichment.yaml"),
+    )
+    original = load_wisdom(artifacts.wisdom_imported_json)
+    nulled = load_wisdom(artifacts.wisdom_imported_json)
+    nulled["synonym_sets"] = None
+    assert dump_ossie(wisdom_to_ossie(nulled)) == dump_ossie(wisdom_to_ossie(original))
+
+    listed = load_wisdom(artifacts.wisdom_imported_json)
+    listed["synonym_sets"]["items_json"] = "[]"
+    with pytest.raises(SystemExit) as caught:
+        wisdom_to_ossie(listed)
+    assert caught.value.code == 1
+    assert capsys.readouterr().err.strip() == "synonym_sets.items_json"
+
+
+def test_newline_synonym_exits(capsys):
+    view = load_semantic_view(fixture_body(FINANCE / "snowflake" / "cfo_cockpit.before.yaml"))
+    view["metrics"][0]["synonyms"] = ["board\nrevenue"]
+    with pytest.raises(SystemExit) as caught:
+        semantic_view_to_ossie(view)
+    assert caught.value.code == 1
+    assert capsys.readouterr().err.strip() == "synonyms"
+
+
+def test_duplicate_synonym_exits(capsys):
+    view = load_semantic_view(fixture_body(FINANCE / "snowflake" / "cfo_cockpit.before.yaml"))
+    view["metrics"][0]["synonyms"] = ["revenue", "revenue"]
+    with pytest.raises(SystemExit) as caught:
+        semantic_view_to_ossie(view)
+    assert caught.value.code == 1
+    assert capsys.readouterr().err.strip() == "synonyms"
+
+
+def test_empty_synonyms_are_absent_after_import():
+    original = fixture_body(FINANCE / "snowflake" / "cfo_cockpit.before.yaml")
+    view = load_semantic_view(original)
+    view["metrics"][0]["synonyms"] = []
+    model = semantic_view_to_ossie(view)
+    assert "ai_context" not in model["metrics"][0]
+    assert model == semantic_view_to_ossie(load_semantic_view(original))
+    assert dump_semantic_view(ossie_to_semantic_view(model)) == original
+
+
+def test_knowledge_id_collision_exits(capsys):
+    view = load_semantic_view(fixture_body(FINANCE / "snowflake" / "cfo_cockpit.before.yaml"))
+    model = semantic_view_to_ossie(view)
+    expression = model["metrics"][0]["expression"]
+    model["metrics"] = [
+        {
+            "name": "net-revenue",
+            "description": "Net revenue",
+            "expression": expression,
+            "ai_context": {"synonyms": ["net revenue"]},
+        },
+        {
+            "name": "net_revenue",
+            "description": "Net revenue underscore",
+            "expression": expression,
+            "ai_context": {"synonyms": ["net_revenue"]},
+        },
+    ]
+    with pytest.raises(SystemExit) as caught:
+        ossie_to_wisdom(model)
+    assert caught.value.code == 1
+    assert capsys.readouterr().err.strip() == (
+        "duplicate knowledge id: ET_UNSTRUCTURED_KNOWLEDGE_synonyms_for_net_revenue "
+        "(Synonyms for net-revenue, Synonyms for net_revenue)"
+    )
 
 
 def test_nonempty_synonym_sets_exit(capsys):

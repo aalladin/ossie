@@ -244,11 +244,25 @@ def _metric_to_ossie(metric: dict, dataset_names: list[str]) -> dict:
         "expression": snowflake_expression(expression),
     }
     if "synonyms" in metric:
-        synonyms = metric["synonyms"]
-        if not isinstance(synonyms, list) or not all(isinstance(item, str) for item in synonyms):
-            die("synonyms")
-        converted["ai_context"] = {"synonyms": list(synonyms)}
+        synonyms = _import_synonyms(metric["synonyms"])
+        if synonyms:
+            converted["ai_context"] = {"synonyms": synonyms}
     return converted
+
+
+def _import_synonyms(synonyms: object) -> list[str]:
+    if not isinstance(synonyms, list) or not all(isinstance(item, str) for item in synonyms):
+        die("synonyms")
+    # An empty list is the same as an omitted key. _knowledge_from_model
+    # drops empty lists, so keeping [] would not round-trip.
+    if not synonyms:
+        return []
+    seen: set[str] = set()
+    for synonym in synonyms:
+        if "\n" in synonym or "\r" in synonym or synonym in seen:
+            die("synonyms")
+        seen.add(synonym)
+    return list(synonyms)
 
 
 def _dataset_to_table(dataset: dict) -> dict:

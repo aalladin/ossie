@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 
 from ossie_wisdom_semantic_view.model import (
     SPEC_VERSION,
@@ -77,17 +76,38 @@ def empty_item_list() -> dict:
     return {"ref": None, "items_json": "{}"}
 
 
+def reject_duplicate_knowledge_ids(items: list[dict]) -> None:
+    """Fail when two knowledge names slugify to the same id. Do not suffix."""
+
+    seen: dict[str, str] = {}
+    for item in items:
+        item_id = item["id"]
+        name = item["name"]
+        if item_id in seen:
+            die(f"duplicate knowledge id: {item_id} ({seen[item_id]}, {name})")
+        seen[item_id] = name
+
+
 def reject_nonempty_synonym_sets(export: dict) -> None:
-    raw = export.get("synonym_sets", {}).get("items_json", "{}")
+    synonym_sets = export.get("synonym_sets", {})
+    # A present null is an empty set, not a missing dict.
+    if synonym_sets is None:
+        return
+    if not isinstance(synonym_sets, dict):
+        die("synonym_sets")
+    raw = synonym_sets.get("items_json", "{}")
+    if raw is None:
+        return
     if not isinstance(raw, str):
         die("synonym_sets.items_json")
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         die("synonym_sets.items_json")
-    if parsed != {}:
-        print("synonym_sets.items_json", file=sys.stderr)
-        raise SystemExit(1)
+    if parsed is None:
+        return
+    if not isinstance(parsed, dict) or parsed != {}:
+        die("synonym_sets.items_json")
 
 
 def ossie_to_wisdom(model: dict) -> dict:
@@ -288,6 +308,7 @@ def _knowledge_from_model(model: dict) -> list[dict]:
                 "id": knowledge_id(BOARD_REVENUE),
             }
         )
+    reject_duplicate_knowledge_ids(items)
     return items
 
 
